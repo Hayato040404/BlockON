@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlockWorld - 無限ブロックアドベンチャー</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #333; }
+    canvas { display: none; }
+    #crosshair, #loading, #menu { display: none; }
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 20px;
+      height: 20px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    #crosshair::before, #crosshair::after {
+      content: '';
+      position: absolute;
+      background: white;
+      opacity: 0.7;
+    }
+    #crosshair::before {
+      width: 2px;
+      height: 20px;
+      left: 9px;
+    }
+    #crosshair::after {
+      width: 20px;
+      height: 2px;
+      top: 9px;
+    }
+    #menu {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #main-menu {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #main-menu h1 {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+    #menu button, #main-menu button {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 18px;
+      background: #007bff;
+      border: none;
+      color: white;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    #menu button:hover, #main-menu button:hover {
+      background: #0056b3;
+    }
+    #error {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 0, 0, 0.8);
+      color: white;
+      justify-content: center;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    #loading {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+      font-size: 16px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="main-menu">
+    <h1>BlockWorld</h1>
+    <button onclick="startGame()">開始</button>
+    <button onclick="exitGame()">終了</button>
+  </div>
+  <div id="crosshair"></div>
+  <div id="menu">
+    <h2>メニュー</h2>
+    <button onclick="resumeGame()">続行</button>
+    <button onclick="returnToMenu()">メニューに戻る</button>
+  </div>
+  <div id="error">
+    <p>WebGLを初期化できませんでした。以下のいずれかをお試しください：<br>
+    - 最新のブラウザ（Chrome、Firefoxなど）を使用<br>
+    - グラフィックドライバを更新<br>
+    - <a href="https://get.webgl.org/" target="_blank">WebGLのサポートを確認</a><br>
+    - ブラウザの設定で「ハードウェアアクセラレーション」を有効化<br>
+    - <a href="https://www.khronos.org/webgl/wiki/Troubleshooting" target="_blank">WebGLトラブルシューティング</a></p>
+  </div>
+  <div id="loading">チャンクを読み込み中。。。</div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script>
+    console.log('BlockWorld script loaded, showing main menu');
+
+    // グローバル変数
+    let renderer, scene, camera, raycaster, player;
+
+    // ゲーム初期化
+    function initGame() {
+      // WebGL初期化
+      try {
+        renderer = new THREE.WebGLRenderer({ 
+          antialias: true, 
+          failIfMajorPerformanceCaveat: true 
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        
+        const gl = renderer.getContext();
+        if (!gl) throw new Error('WebGL context is not available');
+        console.log('Renderer initialized, WebGL version:', gl instanceof WebGL2RenderingContext ? 'WebGL2' : 'WebGL1');
+      } catch (e) {
+        document.getElementById('error').style.display = 'flex';
+        console.error('WebGL initialization failed:', e);
+        throw e;
+      }
+
+      // シーンのセットアップ
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      raycaster = new THREE.Raycaster();
+      raycaster.far = 10;
+
+      // プレイヤーの設定
+      player = {
+        position: new THREE.Vector3(0, 10, 0),
+        velocity: new THREE.Vector3(0, 0, 0),
+        height: 1.8,
+        speed: 0.1,
+        jumpPower: 0.45,
+        isGrounded: false,
+        isSneaking: false
+      };
+      camera.position.copy(player.position);
+      console.log('Player spawned at:', player.position);
+
+      // ブロックの種類
+      const blockTypes = [
+        { name: 'grass', color: 0x6aaa64, receiveShadow: true },
+        { name: 'dirt', color: 0x8b4513, receiveShadow: true },
+        { name: 'stone', color: 0x808080, receiveShadow: true },
+        { name: 'wood', color: 0xdeb887, castShadow: true },
+        { name: 'sand', color: 0xf4a460, receiveShadow: true },
+        { name: 'water', color: 0x4682b4 },
+        { name: 'leaves', color: 0x4a7043, castShadow: true },
+        { name: 'coal', color: 0x333333 }
+      ];
+      const blockMaterials = blockTypes.map(type => new THREE.MeshLambertMaterial({ 
+        color: type.color,
+        transparent: type.name === 'water' ? true : false,
+        opacity: type.name === 'water' ? 0.6 : 1
+      }));
+
+      // 簡易Perlinノイズ
+      function noise(x, z) {
+        const seed = 12345;
+        const value = Math.sin(x * 0.05 + seed) * Math.cos(z * 0.05 + seed);
+        return (value + 1) / 2;
+      }
+
+      // チャンク管理
+      const chunkSize = 16;
+      const viewDistance = 1;
+      const chunks = new Map();
+      const blocks = [];
+      const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+
+      function isBlockExposed(x, y, z, chunkBlocks) {
+        const neighbors = [
+          { x: x + 1, y, z }, { x: x - 1, y, z },
+          { x, y: y + 1, z }, { x, y: y - 1, z },
+          { x, y, z: z + 1 }, { x, y, z: z - 1 }
+        ];
+        return neighbors.some(n => !chunkBlocks.some(b => b.x === n.x && b.y === n.y && b.z === n.z));
+      }
+
+      function updateChunkMesh(chunkX, chunkZ) {
+        const chunkKey = `${chunkX},${chunkZ}`;
+        const chunk = chunks.get(chunkKey);
+        if (!chunk) return;
+
+        chunk.meshes.forEach(mesh => scene.remove(mesh));
+        chunk.meshes = [];
+
+        const instanceCounts = new Array(blockTypes.length).fill(0);
+        const instances = blockTypes.map(() => []);
+        chunk.blocks.forEach(block => {
+          if (isBlockExposed(block.x, block.y, block.z, chunk.blocks)) {
+            const typeIndex = blockTypes.findIndex(t => t.name === block.type);
+            instances[typeIndex].push(new THREE.Vector3(block.x, block.y, block.z));
+            instanceCounts[typeIndex]++;
+          }
+        });
+
+        blockTypes.forEach((type, i) => {
+          if (instanceCounts[i] > 0) {
+            const instancedMesh = new THREE.InstancedMesh(blockGeometry, blockMaterials[i], instanceCounts[i]);
+            instancedMesh.castShadow = type.castShadow || false;
+            instancedMesh.receiveShadow = type.receiveShadow || false;
+            instancedMesh.userData = { chunkX, chunkZ, type: type.name };
+            instances[i].forEach((pos, j) => {
+              const matrix = new THREE.Matrix4().setPosition(pos);
+              instancedMesh.setMatrixAt(j, matrix);
+            });
+            scene.add(instancedMesh);
+            chunk.meshes.push(instancedMesh);
+            console.log(`Mesh added for ${type.name} in chunk ${chunkKey}, instances: ${instanceCounts[i]}`);
+          }
+        });
+      }
+
+      function placeBlock() {
+        console.log('placeBlock called');
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const meshes = scene.children.filter(child => child.isInstancedMesh);
+        console.log('Meshes available for raycast:', meshes.length);
+        const intersects = raycaster.intersectObjects(meshes, true);
+        
+        if (intersects.length > 0) {
+          const intersect = intersects[0];
+          console.log('Intersection found:', intersect);
+
+          const mesh = intersect.object;
+          if (mesh.isInstancedMesh && intersect.instanceId !== undefined) {
+            const instanceId = intersect.instanceId;
+            const matrix = new THREE.Matrix4();
+            mesh.getMatrixAt(instanceId, matrix);
+            const blockPos = new THREE.Vector3().setFromMatrixPosition(matrix);
+
+            const normal = intersect.face.normal.clone();
+            const newBlockPos = blockPos.clone().add(normal);
+
+            newBlockPos.x = Math.floor(newBlockPos.x);
+            newBlockPos.y = Math.floor(newBlockPos.y);
+            newBlockPos.z = Math.floor(newBlockPos.z);
+
+            const playerBox = {
+              min: new THREE.Vector3(player.position.x - 0.4, player.position.y - player.height, player.position.z - 0.4),
+              max: new THREE.Vector3(player.position.x + 0.4, player.position.y, player.position.z + 0.4)
+            };
+            const blockBox = {
+              min: new THREE.Vector3(newBlockPos.x - 0.5, newBlockPos.y - 0.5, newBlockPos.z - 0.5),
+              max: new THREE.Vector3(newBlockPos.x + 0.5, newBlockPos.y + 0.5, newBlockPos.z + 0.5)
+            };
+            if (
+              playerBox.min.x < blockBox.max.x && playerBox.max.x > blockBox.min.x &&
+              playerBox.min.y < blockBox.max.y && playerBox.max.y > blockBox.min.y &&
+              playerBox.min.z < blockBox.max.z && playerBox.max.z > blockBox.min.z
+            ) {
+              console.log('Block placement blocked: Overlaps with player');
+              return;
+            }
+
+            if (blocks.some(b => b.x === newBlockPos.x && b.y === newBlockPos.y && b.z === newBlockPos.z)) {
+              console.log('Block placement blocked: Overlaps with existing block');
+              return;
+            }
+
+            const chunkX = Math.floor(newBlockPos.x / chunkSize);
+            const chunkZ = Math.floor(newBlockPos.z / chunkSize);
+            const chunkKey = `${chunkX},${chunkZ}`;
+            let chunk = chunks.get(chunkKey);
+            if (!chunk) {
+              chunk = { blocks: [], meshes: [] };
+              chunks.set(chunkKey, chunk);
+            }
+            const newBlock = { x: newBlockPos.x, y: newBlockPos.y, z: newBlockPos.z, type: 'dirt' };
+            chunk.blocks.push(newBlock);
+            blocks.push(newBlock);
+
+            updateChunkMesh(chunkX, chunkZ);
+            console.log('Block placed at:', newBlockPos, 'in chunk:', chunkKey);
+          } else {
+            console.log('Intersection is not a valid InstancedMesh or missing instanceId');
+          }
+        } else {
+          console.log('No intersection found');
+        }
+      }
+
+      function generateChunk(chunkX, chunkZ) {
+        const chunkKey = `${chunkX},${chunkZ}`;
+        if (chunks.has(chunkKey)) return;
+
+        const chunkBlocks = [];
+        const instanceCounts = new Array(blockTypes.length).fill(0);
+        const instances = blockTypes.map(() => []);
+
+        for (let x = chunkX * chunkSize; x < (chunkX + 1) * chunkSize; x++) {
+          for (let z = chunkZ * chunkSize; z < (chunkZ + 1) * chunkSize; z++) {
+            const height = Math.floor(noise(x, z) * 6 + 4);
+            for (let y = 0; y <= height; y++) {
+              let typeIndex;
+              if (y === height) typeIndex = height <= 4 ? 4 : 0;
+              else if (y > height - 3) typeIndex = 1;
+              else typeIndex = Math.random() < 0.05 ? 7 : 2;
+              chunkBlocks.push({ x, y, z, type: blockTypes[typeIndex].name });
+              if (isBlockExposed(x, y, z, chunkBlocks)) {
+                instances[typeIndex].push(new THREE.Vector3(x, y, z));
+                instanceCounts[typeIndex]++;
+              }
+            }
+            if (height <= 3) {
+              chunkBlocks.push({ x, y: 4, z, type: 'water' });
+              if (isBlockExposed(x, 4, z, chunkBlocks)) {
+                instances[5].push(new THREE.Vector3(x, 4, z));
+                instanceCounts[5]++;
+              }
+            }
+          }
+        }
+
+        // 木の生成
+        for (let i = 0; i < 2; i++) {
+          const x = Math.floor(Math.random() * chunkSize) + chunkX * chunkSize;
+          const z = Math.floor(Math.random() * chunkSize) + chunkZ * chunkSize;
+          const height = Math.floor(noise(x, z) * 6 + 4);
+          if (height >= 5 && height <= 7) {
+            for (let y = height + 1; y < height + 4; y++) {
+              chunkBlocks.push({ x, y, z, type: 'wood' });
+              if (isBlockExposed(x, y, z, chunkBlocks)) {
+                instances[3].push(new THREE.Vector3(x, y, z));
+                instanceCounts[3]++;
+              }
+            }
+            for (let y = height + 4; y < height + 6; y++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                  if (dx === 0 && dz === 0 && y === height + 5) continue;
+                  chunkBlocks.push({ x: x + dx, y, z: z + dz, type: 'leaves' });
+                  if (isBlockExposed(x + dx, y, z + dz, chunkBlocks)) {
+                    instances[6].push(new THREE.Vector3(x + dx, y, z + dz));
+                    instanceCounts[6]++;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        const meshes = [];
+        blockTypes.forEach((type, i) => {
+          if (instanceCounts[i] > 0) {
+            const instancedMesh = new THREE.InstancedMesh(blockGeometry, blockMaterials[i], instanceCounts[i]);
+            instancedMesh.castShadow = type.castShadow || false;
+            instancedMesh.receiveShadow = type.receiveShadow || false;
+            instancedMesh.userData = { chunkX, chunkZ, type: type.name };
+            instances[i].forEach((pos, j) => {
+              const matrix = new THREE.Matrix4().setPosition(pos);
+              instancedMesh.setMatrixAt(j, matrix);
+            });
+            scene.add(instancedMesh);
+            meshes.push(instancedMesh);
+          }
+        });
+
+        chunks.set(chunkKey, { blocks: chunkBlocks, meshes });
+        chunkBlocks.forEach(block => blocks.push(block));
+        console.log(`Chunk generated: ${chunkKey}, blocks: ${chunkBlocks.length}`);
+      }
+
+      function removeChunk(chunkX, chunkZ) {
+        const chunkKey = `${chunkX},${chunkZ}`;
+        const chunk = chunks.get(chunkKey);
+        if (chunk) {
+          chunk.meshes.forEach(mesh => scene.remove(mesh));
+          chunk.blocks.forEach(block => {
+            const index = blocks.findIndex(b => b.x === block.x && b.y === block.y && b.z === block.z);
+            if (index !== -1) blocks.splice(index, 1);
+          });
+          chunks.delete(chunkKey);
+          console.log(`Chunk removed: ${chunkKey}`);
+        }
+      }
+
+      function updateChunks() {
+        const chunkX = Math.floor(player.position.x / chunkSize);
+        const chunkZ = Math.floor(player.position.z / chunkSize);
+        let chunksToGenerate = 0;
+
+        for (let x = chunkX - viewDistance; x <= chunkX + viewDistance; x++) {
+          for (let z = chunkZ - viewDistance; z <= chunkZ + viewDistance; z++) {
+            if (!chunks.has(`${x},${z}`)) {
+              chunksToGenerate++;
+            }
+          }
+        }
+
+        if (chunksToGenerate > 0) {
+          document.getElementById('loading').style.display = 'block';
+          console.log('Showing loading notification, chunks to generate:', chunksToGenerate);
+        }
+
+        for (let x = chunkX - viewDistance; x <= chunkX + viewDistance; x++) {
+          for (let z = chunkZ - viewDistance; z <= chunkZ + viewDistance; z++) {
+            generateChunk(x, z);
+          }
+        }
+
+        for (const [key] of chunks) {
+          const [x, z] = key.split(',').map(Number);
+          if (Math.abs(x - chunkX) > viewDistance || Math.abs(z - chunkZ) > viewDistance) {
+            removeChunk(x, z);
+          }
+        }
+
+        if (chunksToGenerate > 0) {
+          document.getElementById('loading').style.display = 'none';
+          console.log('Hiding loading notification');
+        }
+      }
+
+      // 初期チャンク生成
+      updateChunks();
+
+      // ライト（影対応）
+      const light = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(light);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      directionalLight.position.set(10, 20, 10);
+      directionalLight.castShadow = true;
+      directionalLight.shadow.mapSize.width = 512;
+      directionalLight.shadow.mapSize.height = 512;
+      directionalLight.shadow.camera.left = -20;
+      directionalLight.shadow.camera.right = 20;
+      directionalLight.shadow.camera.top = 20;
+      directionalLight.shadow.camera.bottom = -20;
+      scene.add(directionalLight);
+
+      // 入力処理
+      const keys = {};
+      document.addEventListener('keydown', (e) => {
+        keys[e.code] = true;
+        console.log('Key pressed:', e.code);
+        if (e.code === 'Space' && player.isGrounded && !player.isSneaking) {
+          player.velocity.y = player.jumpPower;
+          player.isGrounded = false;
+          console.log('Jump triggered, velocity.y:', player.velocity.y);
+        }
+        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+          player.isSneaking = true;
+          player.height = 1.5;
+          player.speed = 0.03;
+          console.log('Sneak enabled, height:', player.height, 'speed:', player.speed);
+        }
+        if (e.code === 'Escape') {
+          if (!renderer) {
+            console.warn('Renderer not initialized, cannot exit pointer lock');
+            return;
+          }
+          document.exitPointerLock();
+          document.getElementById('menu').style.display = 'flex';
+          console.log('Escape pressed, showing menu');
+        }
+      });
+      document.addEventListener('keyup', (e) => {
+        keys[e.code] = false;
+        console.log('Key released:', e.code);
+        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+          player.isSneaking = false;
+          player.height = 1.8;
+          player.speed = 0.1;
+          console.log('Sneak disabled, height:', player.height, 'speed:', player.speed);
+        }
+      });
+
+      // ブロック設置（右クリック）
+      function registerRightClickHandlers() {
+        document.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          console.log('contextmenu event fired, pointerLockElement:', document.pointerLockElement);
+          if (document.getElementById('menu').style.display !== 'flex') {
+            console.log('Calling placeBlock from contextmenu');
+            placeBlock();
+          } else {
+            console.log('Right-click ignored: Menu is open');
+          }
+        });
+
+        document.addEventListener('mousedown', (e) => {
+          if (e.button === 2) {
+            e.preventDefault();
+            console.log('Right-click (mousedown) detected, pointerLockElement:', document.pointerLockElement);
+            if (document.getElementById('menu').style.display !== 'flex') {
+              console.log('Calling placeBlock from mousedown');
+              placeBlock();
+            } else {
+              console.log('Right-click ignored: Menu is open');
+            }
+          }
+        });
+      }
+      console.log('Right-click handlers registered');
+      registerRightClickHandlers();
+
+      // ポインターロック（左クリック）
+      document.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && document.getElementById('menu').style.display !== 'flex' && document.getElementById('error').style.display !== 'flex') {
+          if (!renderer) {
+            console.warn('Renderer not initialized, cannot request pointer lock');
+            return;
+          }
+          renderer.domElement.requestPointerLock();
+          console.log('Left-click detected, requesting pointer lock');
+        }
+      });
+
+      // ポインターロック状態の監視
+      document.addEventListener('pointerlockchange', () => {
+        if (document.pointerLockElement === renderer.domElement) {
+          console.log('Pointer lock enabled');
+        } else {
+          console.log('Pointer lock disabled');
+        }
+      });
+
+      // 接地判定
+      function checkGround() {
+        const footY = player.position.y - player.height;
+        const footYFloor = Math.floor(footY);
+        const playerBox = {
+          min: new THREE.Vector3(player.position.x - 0.4, footY - 0.1, player.position.z - 0.4),
+          max: new THREE.Vector3(player.position.x + 0.4, footY, player.position.z + 0.4)
+        };
+        for (const block of blocks) {
+          const blockBox = {
+            min: new THREE.Vector3(block.x - 0.5, block.y - 0.5, block.z - 0.5),
+            max: new THREE.Vector3(block.x + 0.5, block.y + 0.5, block.z + 0.5)
+          };
+          if (
+            playerBox.min.x < blockBox.max.x && playerBox.max.x > blockBox.min.x &&
+            playerBox.min.y < blockBox.max.y && playerBox.max.y > blockBox.min.y &&
+            playerBox.min.z < blockBox.max.z && playerBox.max.z > blockBox.min.z
+          ) {
+            console.log('Ground detected at:', block.x, block.y, block.z);
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // 衝突判定
+      function checkCollision(nextPos) {
+        const playerBox = {
+          min: new THREE.Vector3(nextPos.x - 0.4, nextPos.y - player.height, nextPos.z - 0.4),
+          max: new THREE.Vector3(nextPos.x + 0.4, nextPos.y, nextPos.z + 0.4)
+        };
+        for (const block of blocks) {
+          const blockBox = {
+            min: new THREE.Vector3(block.x - 0.5, block.y - 0.5, block.z - 0.5),
+            max: new THREE.Vector3(block.x + 0.5, block.y + 0.5, block.z + 0.5)
+          };
+          if (
+            playerBox.min.x < blockBox.max.x && playerBox.max.x > blockBox.min.x &&
+            playerBox.min.y < blockBox.max.y && playerBox.max.y > blockBox.min.y &&
+            playerBox.min.z < blockBox.max.z && playerBox.max.z > blockBox.min.z
+          ) {
+            console.log('Collision detected at:', block.x, block.y, block.z);
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // エッジ検出（スニーク用）
+      function checkEdge(nextPos) {
+        if (!player.isSneaking) return nextPos;
+        const footY = Math.floor(player.position.y - player.height);
+        const nextX = nextPos.x;
+        const nextZ = nextPos.z;
+        let snappedPos = nextPos.clone();
+
+        // プレイヤーの境界（±0.4）をブロックのエッジ（±0.5）にチェック
+        const edges = [
+          { x: Math.floor(nextX - 0.4), z: Math.floor(nextZ - 0.4) },
+          { x: Math.floor(nextX + 0.4), z: Math.floor(nextZ - 0.4) },
+          { x: Math.floor(nextX - 0.4), z: Math.floor(nextZ + 0.4) },
+          { x: Math.floor(nextX + 0.4), z: Math.floor(nextZ + 0.4) }
+        ];
+
+        let atEdge = false;
+        edges.forEach(edge => {
+          const hasBlockBelow = blocks.some(b => b.x === edge.x && b.y === footY && b.z === edge.z);
+          if (!hasBlockBelow) {
+            atEdge = true;
+            // エッジにスナップ
+            if (Math.abs(nextX - edge.x) > 0.5) {
+              snappedPos.x = edge.x + (nextX > edge.x ? 0.9 : -0.9);
+            }
+            if (Math.abs(nextZ - edge.z) > 0.5) {
+              snappedPos.z = edge.z + (nextZ > edge.z ? 0.9 : -0.9);
+            }
+          }
+        });
+
+        if (atEdge) {
+          console.log('Edge detected, snapping to:', snappedPos);
+          return snappedPos;
+        }
+        return nextPos;
+      }
+
+      // 視点制御（Minecraft風）
+      let yaw = 0, pitch = 0;
+      document.addEventListener('mousemove', (e) => {
+        if (document.pointerLockElement) {
+          yaw -= e.movementX * 0.002;
+          pitch -= e.movementY * 0.002;
+          pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+          console.log('Yaw:', yaw, 'Pitch:', pitch);
+        }
+      });
+
+      // メニュー操作
+      function resumeGame() {
+        if (!renderer) {
+          console.warn('Renderer not initialized, cannot resume game');
+          return;
+        }
+        document.getElementById('menu').style.display = 'none';
+        renderer.domElement.requestPointerLock();
+        console.log('Resuming game, requesting pointer lock');
+      }
+
+      function returnToMenu() {
+        if (!renderer) {
+          console.warn('Renderer not initialized, cannot return to menu');
+          return;
+        }
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('main-menu').style.display = 'flex';
+        document.getElementById('crosshair').style.display = 'none';
+        renderer.domElement.style.display = 'none';
+        console.log('Returning to main menu');
+      }
+
+      // アニメーションループ
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // 接地判定
+        player.isGrounded = checkGround();
+        console.log('Grounded:', player.isGrounded);
+
+        // 移動処理（WASD）
+        const move = new THREE.Vector3();
+        if (keys['KeyW']) move.z += 1; // 前進
+        if (keys['KeyS']) move.z -= 1; // 後退
+        if (keys['KeyA']) move.x -= 1; // 左
+        if (keys['KeyD']) move.x += 1; // 右
+        console.log('Move vector:', move);
+
+        // カメラの向きに基づく移動
+        const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        player.velocity.x = move.dot(right) * player.speed;
+        player.velocity.z = move.dot(forward) * player.speed;
+
+        // 重力
+        player.velocity.y -= 0.01;
+        let nextPos = player.position.clone().add(player.velocity);
+
+        // エッジ検出（スニーク中）
+        nextPos = checkEdge(nextPos);
+
+        // 衝突判定（各軸独立）
+        if (!checkCollision(new THREE.Vector3(nextPos.x, player.position.y, player.position.z))) {
+          player.position.x = nextPos.x;
+        }
+        if (!checkCollision(new THREE.Vector3(player.position.x, player.position.y, nextPos.z))) {
+          player.position.z = nextPos.z;
+        }
+        if (!checkCollision(new THREE.Vector3(player.position.x, nextPos.y, player.position.z))) {
+          player.position.y = nextPos.y;
+        } else if (player.velocity.y < 0) {
+          player.velocity.y = 0;
+          player.isGrounded = true;
+        }
+
+        // チャンク更新
+        updateChunks();
+
+        // カメラ更新（スニーク時に視点下げる）
+        const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+        camera.quaternion.copy(quaternion);
+        camera.position.copy(player.position);
+        if (player.isSneaking) {
+          camera.position.y -= 0.3;
+        }
+
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // ウィンドウリサイズ対応
+      window.addEventListener('resize', () => {
+        if (!renderer) {
+          console.warn('Renderer not initialized, cannot resize');
+          return;
+        }
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+
+    // メイン画面操作
+    function startGame() {
+      console.log('Starting game');
+      document.getElementById('main-menu').style.display = 'none';
+      document.getElementById('crosshair').style.display = 'block';
+      initGame();
+      renderer.domElement.style.display = 'block';
+      renderer.domElement.requestPointerLock();
+    }
+
+    function exitGame() {
+      console.log('Exiting game');
+      window.location.reload();
+    }
+
+    console.log('BlockWorld script parsed successfully');
+  </script>
+</body>
+</html>

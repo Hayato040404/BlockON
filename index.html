@@ -112,9 +112,9 @@
     <h1>BlockWorld</h1>
     <button onclick="startGame()">開始</button>
     <button onclick="exitGame()">終了</button>
-    <p></p>
+    <p>広告収入にご協力お願いします。</p>
      <!-- admax -->
-<script src="https://adm.shinobi.jp/s/1708d60e29537fae4eeaf4f28c60b2f1"></script>
+<script src="https://adm.shinobi.jp/s/e0a074baae0c8b83c7fd971d6d6d2ffd"></script>
 <!-- admax -->
   </div>
   <div id="crosshair"></div>
@@ -127,7 +127,7 @@
   <p></p>
  <!--shinobi1--><script type="text/javascript" src="//xa.shinobi.jp/ufo/191949200"></script><noscript><a href="//xa.shinobi.jp/bin/gg?191949200" target="_blank"><img src="//xa.shinobi.jp/bin/ll?191949200" border="0"></a><br><span style="font-size:9px"><img style="margin:0;vertical-align:text-bottom;" src="//img.shinobi.jp/tadaima/fj.gif" width="19" height="11"> </span></noscript><!--shinobi2-->
   <div id="error">
-    <p>WebGLを初期化できませんでした。以下のいずれかをお試しください：<br>
+    <p>WebGLを初期化できませんでした。以下のいずれかをお試しください<br>
     - 最新のブラウザ（Chrome、Firefoxなど）を使用<br>
     - グラフィックドライバを更新<br>
     - <a href="https://get.webgl.org/" target="_blank">WebGLのサポートを確認</a><br>
@@ -706,7 +706,7 @@
         player.velocity.z = move.dot(forward) * player.speed;
 
         // 重力
-        player.velocity.y -= 0.01;
+        player.velocity.y -= 0.07;
         let nextPos = player.position.clone().add(player.velocity);
 
         // エッジ検出（スニーク中）

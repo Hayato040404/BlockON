@@ -94,16 +94,55 @@
     }
     #loading {
       position: absolute;
-      top: 10px;
+      top: 50%;
       left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.5);
       color: white;
-      padding: 10px 20px;
+      padding: 15px 30px;
       border-radius: 5px;
       font-family: Arial, sans-serif;
-      font-size: 16px;
+      font-size: 20px;
+      font-weight: bold;
+      text-shadow: 2px 2px 2px #000;
       pointer-events: none;
+      z-index: 10;
+    }
+    #progress-container {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 300px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px;
+      border: 4px solid #333;
+      border-radius: 5px;
+      text-align: center;
+      font-family: Arial, sans-serif;
+      color: white;
+      z-index: 10;
+    }
+    #progress-bar {
+      width: 100%;
+      height: 20px;
+      background: #333;
+      border: 2px solid #000;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #progress-fill {
+      height: 100%;
+      background: #00ff00;
+      width: 0%;
+      transition: width 0.2s;
+    }
+    #progress-text {
+      margin-top: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      text-shadow: 2px 2px 2px #000;
     }
   </style>
 </head>
@@ -113,19 +152,22 @@
     <button onclick="startGame()">開始</button>
     <button onclick="exitGame()">終了</button>
     <p>広告収入にご協力お願いします。</p>
-     <!-- admax -->
-<script src="https://adm.shinobi.jp/s/e0a074baae0c8b83c7fd971d6d6d2ffd"></script>
-<!-- admax -->
+    <!-- admax -->
+    <script src="https://adm.shinobi.jp/s/e0a074baae0c8b83c7fd971d6d6d2ffd"></script>
+    <!-- admax -->
   </div>
   <div id="crosshair"></div>
   <div id="menu">
     <h2>メニュー</h2>
     <button onclick="resumeGame()">続行</button>
+    <button onclick="saveWorld()">ワールドを保存</button>
     <button onclick="returnToMenu()">メニューに戻る</button>
-    
   </div>
   <p></p>
- <!--shinobi1--><script type="text/javascript" src="//xa.shinobi.jp/ufo/191949200"></script><noscript><a href="//xa.shinobi.jp/bin/gg?191949200" target="_blank"><img src="//xa.shinobi.jp/bin/ll?191949200" border="0"></a><br><span style="font-size:9px"><img style="margin:0;vertical-align:text-bottom;" src="//img.shinobi.jp/tadaima/fj.gif" width="19" height="11"> </span></noscript><!--shinobi2-->
+  <!--shinobi1-->
+  <script type="text/javascript" src="//xa.shinobi.jp/ufo/191949200"></script>
+  <noscript><a href="//xa.shinobi.jp/bin/gg?191949200" target="_blank"><img src="//xa.shinobi.jp/bin/ll?191949200" border="0"></a><br><span style="font-size:9px"><img style="margin:0;vertical-align:text-bottom;" src="//img.shinobi.jp/tadaima/fj.gif" width="19" height="11"> </span></noscript>
+  <!--shinobi2-->
   <div id="error">
     <p>WebGLを初期化できませんでした。以下のいずれかをお試しください<br>
     - 最新のブラウザ（Chrome、Firefoxなど）を使用<br>
@@ -134,13 +176,19 @@
     - ブラウザの設定で「ハードウェアアクセラレーション」を有効化<br>
     - <a href="https://www.khronos.org/webgl/wiki/Troubleshooting" target="_blank">WebGLトラブルシューティング</a></p>
   </div>
-  <div id="loading">チャンクを読み込み中。。。</div>
+  <div id="loading">チャンクを読み込み中...</div>
+  <div id="progress-container">
+    <div id="progress-bar">
+      <div id="progress-fill"></div>
+    </div>
+    <div id="progress-text">ワールドを生成中: 0%</div>
+  </div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
   <script>
     console.log('BlockWorld script loaded, showing main menu');
 
     // グローバル変数
-    let renderer, scene, camera, raycaster, player;
+    let renderer, scene, camera, raycaster, player, sun, gameTime = 0;
 
     // ゲーム初期化
     function initGame() {
@@ -178,10 +226,11 @@
         speed: 0.1,
         jumpPower: 0.45,
         isGrounded: false,
-        isSneaking: false
+        isSneaking: false,
+        mode: 'creative'
       };
       camera.position.copy(player.position);
-      console.log('Player spawned at:', player.position);
+      console.log('Player spawned at:', player.position, 'Mode:', player.mode);
 
       // ブロックの種類
       const blockTypes = [
@@ -190,15 +239,38 @@
         { name: 'stone', color: 0x808080, receiveShadow: true },
         { name: 'wood', color: 0xdeb887, castShadow: true },
         { name: 'sand', color: 0xf4a460, receiveShadow: true },
-        { name: 'water', color: 0x4682b4 },
+        { name: 'water', color: 0x4682b4, transparent: true, opacity: 0.6 },
         { name: 'leaves', color: 0x4a7043, castShadow: true },
         { name: 'coal', color: 0x333333 }
       ];
       const blockMaterials = blockTypes.map(type => new THREE.MeshLambertMaterial({ 
         color: type.color,
-        transparent: type.name === 'water' ? true : false,
-        opacity: type.name === 'water' ? 0.6 : 1
+        transparent: type.transparent || false,
+        opacity: type.opacity || 1
       }));
+
+      // 太陽のセットアップ（Minecraft風）
+      const sunGeometry = new THREE.PlaneGeometry(10, 10);
+      const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00, side: THREE.DoubleSide });
+      sun = new THREE.Mesh(sunGeometry, sunMaterial);
+      sun.position.set(50, 50, 50);
+      sun.lookAt(new THREE.Vector3(0, 0, 0));
+      scene.add(sun);
+      console.log('Minecraft-style sun added at:', sun.position);
+
+      // ライト（昼夜対応）
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+      scene.add(ambientLight);
+      const sunLight = new THREE.DirectionalLight(0xffffff, 0.7);
+      sunLight.position.copy(sun.position);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.set(512, 512);
+      sunLight.shadow.camera.left = -20;
+      sunLight.shadow.camera.right = 20;
+      sunLight.shadow.camera.top = 20;
+      sunLight.shadow.camera.bottom = -20;
+      scene.add(sunLight);
+      console.log('Sun light initialized');
 
       // 簡易Perlinノイズ
       function noise(x, z) {
@@ -213,6 +285,56 @@
       const chunks = new Map();
       const blocks = [];
       const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+
+      // ワールド保存とロード
+      function saveWorld() {
+        try {
+          const worldData = {
+            blocks: blocks.map(b => ({ x: b.x, y: b.y, z: b.z, type: b.type })),
+            player: { position: player.position.toArray() }
+          };
+          localStorage.setItem('blockWorld', JSON.stringify(worldData));
+          console.log('World saved, blocks:', blocks.length);
+          alert('ワールドを保存しました！');
+        } catch (e) {
+          console.error('Failed to save world:', e);
+          alert('ワールドの保存に失敗しました。ストレージ容量を確認してください。');
+        }
+      }
+
+      function loadWorld() {
+        const data = localStorage.getItem('blockWorld');
+        if (!data) {
+          console.log('No saved world found');
+          return false;
+        }
+        try {
+          const worldData = JSON.parse(data);
+          worldData.blocks.forEach(b => {
+            const chunkX = Math.floor(b.x / chunkSize);
+            const chunkZ = Math.floor(b.z / chunkSize);
+            const chunkKey = `${chunkX},${chunkZ}`;
+            let chunk = chunks.get(chunkKey);
+            if (!chunk) {
+              chunk = { blocks: [], meshes: [] };
+              chunks.set(chunkKey, chunk);
+            }
+            chunk.blocks.push(b);
+            blocks.push(b);
+          });
+          player.position.fromArray(worldData.player.position);
+          camera.position.copy(player.position);
+          chunks.forEach((chunk, key) => {
+            const [x, z] = key.split(',').map(Number);
+            updateChunkMesh(x, z);
+          });
+          console.log('World loaded, blocks:', blocks.length);
+          return true;
+        } catch (e) {
+          console.error('Failed to load world:', e);
+          return false;
+        }
+      }
 
       function isBlockExposed(x, y, z, chunkBlocks) {
         const neighbors = [
@@ -327,6 +449,57 @@
         }
       }
 
+      function breakBlock() {
+        console.log('breakBlock called');
+        if (player.mode !== 'creative') {
+          console.log('Block breaking blocked: Not in creative mode');
+          return;
+        }
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const meshes = scene.children.filter(child => child.isInstancedMesh);
+        console.log('Meshes available for raycast:', meshes.length);
+        const intersects = raycaster.intersectObjects(meshes, true);
+
+        if (intersects.length > 0) {
+          const intersect = intersects[0];
+          console.log('Intersection found for break:', intersect);
+          const mesh = intersect.object;
+          if (mesh.isInstancedMesh && intersect.instanceId !== undefined) {
+            const instanceId = intersect.instanceId;
+            const matrix = new THREE.Matrix4();
+            mesh.getMatrixAt(instanceId, matrix);
+            const blockPos = new THREE.Vector3().setFromMatrixPosition(matrix).floor();
+
+            const chunkX = Math.floor(blockPos.x / chunkSize);
+            const chunkZ = Math.floor(blockPos.z / chunkSize);
+            const chunkKey = `${chunkX},${chunkZ}`;
+            const chunk = chunks.get(chunkKey);
+            if (!chunk) {
+              console.log('No chunk found for block at:', blockPos);
+              return;
+            }
+
+            const blockIndex = chunk.blocks.findIndex(b => b.x === blockPos.x && b.y === blockPos.y && b.z === blockPos.z);
+            if (blockIndex === -1) {
+              console.log('No block found at:', blockPos);
+              return;
+            }
+
+            const block = chunk.blocks[blockIndex];
+            chunk.blocks.splice(blockIndex, 1);
+            const globalIndex = blocks.findIndex(b => b.x === blockPos.x && b.y === blockPos.y && b.z === blockPos.z);
+            if (globalIndex !== -1) blocks.splice(globalIndex, 1);
+
+            updateChunkMesh(chunkX, chunkZ);
+            console.log('Block broken at:', blockPos, 'Type:', block.type);
+          } else {
+            console.log('Intersection is not a valid InstancedMesh or missing instanceId');
+          }
+        } else {
+          console.log('No intersection found for break');
+        }
+      }
+
       function generateChunk(chunkX, chunkZ) {
         const chunkKey = `${chunkX},${chunkZ}`;
         if (chunks.has(chunkKey)) return;
@@ -359,7 +532,6 @@
           }
         }
 
-        // 木の生成
         for (let i = 0; i < 2; i++) {
           const x = Math.floor(Math.random() * chunkSize) + chunkX * chunkSize;
           const z = Math.floor(Math.random() * chunkSize) + chunkZ * chunkSize;
@@ -426,6 +598,7 @@
         const chunkX = Math.floor(player.position.x / chunkSize);
         const chunkZ = Math.floor(player.position.z / chunkSize);
         let chunksToGenerate = 0;
+        const totalChunks = (2 * viewDistance + 1) ** 2;
 
         for (let x = chunkX - viewDistance; x <= chunkX + viewDistance; x++) {
           for (let z = chunkZ - viewDistance; z <= chunkZ + viewDistance; z++) {
@@ -437,12 +610,25 @@
 
         if (chunksToGenerate > 0) {
           document.getElementById('loading').style.display = 'block';
+          if (!document.getElementById('progress-container').style.display.includes('flex')) {
+            document.getElementById('progress-container').style.display = 'flex';
+            document.getElementById('progress-text').textContent = `ワールドを生成中: 0%`;
+            document.getElementById('progress-fill').style.width = '0%';
+          }
           console.log('Showing loading notification, chunks to generate:', chunksToGenerate);
         }
 
+        let chunksGenerated = 0;
         for (let x = chunkX - viewDistance; x <= chunkX + viewDistance; x++) {
           for (let z = chunkZ - viewDistance; z <= chunkZ + viewDistance; z++) {
-            generateChunk(x, z);
+            if (!chunks.has(`${x},${z}`)) {
+              generateChunk(x, z);
+              chunksGenerated++;
+              const progress = Math.round((chunksGenerated / totalChunks) * 100);
+              document.getElementById('progress-text').textContent = `ワールドを生成中: ${progress}%`;
+              document.getElementById('progress-fill').style.width = `${progress}%`;
+              console.log(`Progress updated: ${progress}%`);
+            }
           }
         }
 
@@ -453,28 +639,17 @@
           }
         }
 
-        if (chunksToGenerate > 0) {
+        if (chunksToGenerate > 0 && chunksGenerated >= chunksToGenerate) {
           document.getElementById('loading').style.display = 'none';
-          console.log('Hiding loading notification');
+          document.getElementById('progress-container').style.display = 'none';
+          console.log('Hiding loading and progress bar');
         }
       }
 
-      // 初期チャンク生成
-      updateChunks();
-
-      // ライト（影対応）
-      const light = new THREE.AmbientLight(0xffffff, 0.6);
-      scene.add(light);
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-      directionalLight.position.set(10, 20, 10);
-      directionalLight.castShadow = true;
-      directionalLight.shadow.mapSize.width = 512;
-      directionalLight.shadow.mapSize.height = 512;
-      directionalLight.shadow.camera.left = -20;
-      directionalLight.shadow.camera.right = 20;
-      directionalLight.shadow.camera.top = 20;
-      directionalLight.shadow.camera.bottom = -20;
-      scene.add(directionalLight);
+      // ワールドロードを試み、失敗したら新規生成
+      if (!loadWorld()) {
+        updateChunks();
+      }
 
       // 入力処理
       const keys = {};
@@ -509,12 +684,13 @@
           player.isSneaking = false;
           player.height = 1.8;
           player.speed = 0.1;
+          player.velocity.set(0, player.velocity.y, 0);
           console.log('Sneak disabled, height:', player.height, 'speed:', player.speed);
         }
       });
 
-      // ブロック設置（右クリック）
-      function registerRightClickHandlers() {
+      // ブロック操作
+      function registerBlockHandlers() {
         document.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           console.log('contextmenu event fired, pointerLockElement:', document.pointerLockElement);
@@ -527,22 +703,25 @@
         });
 
         document.addEventListener('mousedown', (e) => {
-          if (e.button === 2) {
-            e.preventDefault();
-            console.log('Right-click (mousedown) detected, pointerLockElement:', document.pointerLockElement);
-            if (document.getElementById('menu').style.display !== 'flex') {
-              console.log('Calling placeBlock from mousedown');
+          if (document.getElementById('menu').style.display !== 'flex') {
+            if (e.button === 2) {
+              e.preventDefault();
+              console.log('Right-click (mousedown) detected, calling placeBlock');
               placeBlock();
-            } else {
-              console.log('Right-click ignored: Menu is open');
             }
+            if (e.button === 0 && document.pointerLockElement) {
+              console.log('Left-click (mousedown) detected, calling breakBlock');
+              breakBlock();
+            }
+          } else {
+            console.log('Click ignored: Menu is open');
           }
         });
       }
-      console.log('Right-click handlers registered');
-      registerRightClickHandlers();
+      console.log('Block handlers registered');
+      registerBlockHandlers();
 
-      // ポインターロック（左クリック）
+      // ポインターロック
       document.addEventListener('mousedown', (e) => {
         if (e.button === 0 && document.getElementById('menu').style.display !== 'flex' && document.getElementById('error').style.display !== 'flex') {
           if (!renderer) {
@@ -554,7 +733,6 @@
         }
       });
 
-      // ポインターロック状態の監視
       document.addEventListener('pointerlockchange', () => {
         if (document.pointerLockElement === renderer.domElement) {
           console.log('Pointer lock enabled');
@@ -566,7 +744,6 @@
       // 接地判定
       function checkGround() {
         const footY = player.position.y - player.height;
-        const footYFloor = Math.floor(footY);
         const playerBox = {
           min: new THREE.Vector3(player.position.x - 0.4, footY - 0.1, player.position.z - 0.4),
           max: new THREE.Vector3(player.position.x + 0.4, footY, player.position.z + 0.4)
@@ -611,15 +788,17 @@
         return false;
       }
 
-      // エッジ検出（スニーク用）
+      // エッジ検出（スニーク）
       function checkEdge(nextPos) {
-        if (!player.isSneaking) return nextPos;
+        if (!player.isSneaking) {
+          console.log('Not sneaking, returning nextPos:', nextPos);
+          return nextPos;
+        }
         const footY = Math.floor(player.position.y - player.height);
         const nextX = nextPos.x;
         const nextZ = nextPos.z;
         let snappedPos = nextPos.clone();
 
-        // プレイヤーの境界（±0.4）をブロックのエッジ（±0.5）にチェック
         const edges = [
           { x: Math.floor(nextX - 0.4), z: Math.floor(nextZ - 0.4) },
           { x: Math.floor(nextX + 0.4), z: Math.floor(nextZ - 0.4) },
@@ -632,24 +811,65 @@
           const hasBlockBelow = blocks.some(b => b.x === edge.x && b.y === footY && b.z === edge.z);
           if (!hasBlockBelow) {
             atEdge = true;
-            // エッジにスナップ
-            if (Math.abs(nextX - edge.x) > 0.5) {
-              snappedPos.x = edge.x + (nextX > edge.x ? 0.9 : -0.9);
+            if (Math.abs(nextX - edge.x - 0.5) > 0.5) {
+              snappedPos.x = edge.x + (nextX > edge.x ? 0.5 : -0.5);
             }
-            if (Math.abs(nextZ - edge.z) > 0.5) {
-              snappedPos.z = edge.z + (nextZ > edge.z ? 0.9 : -0.9);
+            if (Math.abs(nextZ - edge.z - 0.5) > 0.5) {
+              snappedPos.z = edge.z + (nextZ > edge.z ? 0.5 : -0.5);
             }
           }
         });
 
         if (atEdge) {
-          console.log('Edge detected, snapping to:', snappedPos);
+          console.log('Sneak edge stabilized, snapping to:', snappedPos);
           return snappedPos;
         }
+        console.log('No edge detected, returning nextPos:', nextPos);
         return nextPos;
       }
 
-      // 視点制御（Minecraft風）
+      // 昼夜サイクル（Minecraft風）
+      function updateDayNightCycle() {
+        gameTime += 0.016;
+        const cycle = gameTime % 1440;
+        const isDay = cycle < 720;
+        const t = (cycle % 720) / 720;
+
+        // 太陽の位置
+        const angle = (cycle / 1440) * Math.PI * 2;
+        sun.position.set(50 * Math.cos(angle), 50 * Math.sin(angle), 50 * Math.cos(angle));
+        sun.lookAt(new THREE.Vector3(0, 0, 0));
+        sunLight.position.copy(sun.position);
+        console.log('Sun position updated:', sun.position);
+
+        // Minecraft風の空の色
+        let skyColor;
+        if (cycle < 360) { // 朝
+          const r = 0xFF4500 * (1 - t) + 0xFFD700 * t;
+          const g = 0x4500 * (1 - t) + 0xD700 * t;
+          const b = 0x00 * (1 - t) + 0x87CE * t;
+          skyColor = new THREE.Color(r / 255, g / 255, b / 255);
+        } else if (cycle < 720) { // 昼
+          skyColor = new THREE.Color(0x87CEEB);
+        } else if (cycle < 1080) { // 夕
+          const r = 0xFFD700 * (1 - t) + 0xFF4500 * t;
+          const g = 0xD700 * (1 - t) + 0x4500 * t;
+          const b = 0x87CE * (1 - t) + 0x1970 * t;
+          skyColor = new THREE.Color(r / 255, g / 255, b / 255);
+        } else { // 夜
+          skyColor = new THREE.Color(0x191970);
+        }
+        scene.background = skyColor;
+
+        // 光の調整
+        const intensity = isDay ? 0.3 + 0.4 * (1 - t) : 0.1 + 0.2 * t;
+        ambientLight.intensity = intensity;
+        sunLight.intensity = isDay ? 0.7 * (1 - t) + 0.3 * t : 0.3 * (1 - t) + 0.7 * t;
+        sunLight.color.setHex(isDay ? 0xffffff : 0xaaaaaa);
+        console.log('Day-night cycle:', isDay ? 'Day' : 'Night', 'Time:', cycle, 'Sky:', skyColor);
+      }
+
+      // 視点制御
       let yaw = 0, pitch = 0;
       document.addEventListener('mousemove', (e) => {
         if (document.pointerLockElement) {
@@ -691,15 +911,17 @@
         player.isGrounded = checkGround();
         console.log('Grounded:', player.isGrounded);
 
-        // 移動処理（WASD）
+        // 昼夜サイクル
+        updateDayNightCycle();
+
+        // 移動処理
         const move = new THREE.Vector3();
-        if (keys['KeyW']) move.z += 1; // 前進
-        if (keys['KeyS']) move.z -= 1; // 後退
-        if (keys['KeyA']) move.x -= 1; // 左
-        if (keys['KeyD']) move.x += 1; // 右
+        if (keys['KeyW']) move.z += 1;
+        if (keys['KeyS']) move.z -= 1;
+        if (keys['KeyA']) move.x -= 1;
+        if (keys['KeyD']) move.x += 1;
         console.log('Move vector:', move);
 
-        // カメラの向きに基づく移動
         const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
         const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
         player.velocity.x = move.dot(right) * player.speed;
@@ -709,10 +931,10 @@
         player.velocity.y -= 0.07;
         let nextPos = player.position.clone().add(player.velocity);
 
-        // エッジ検出（スニーク中）
+        // エッジ検出
         nextPos = checkEdge(nextPos);
 
-        // 衝突判定（各軸独立）
+        // 衝突判定
         if (!checkCollision(new THREE.Vector3(nextPos.x, player.position.y, player.position.z))) {
           player.position.x = nextPos.x;
         }
@@ -729,7 +951,7 @@
         // チャンク更新
         updateChunks();
 
-        // カメラ更新（スニーク時に視点下げる）
+        // カメラ更新
         const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
         camera.quaternion.copy(quaternion);
         camera.position.copy(player.position);
@@ -741,7 +963,7 @@
       }
       animate();
 
-      // ウィンドウリサイズ対応
+      // ウィンドウリサイズ
       window.addEventListener('resize', () => {
         if (!renderer) {
           console.warn('Renderer not initialized, cannot resize');
@@ -750,6 +972,7 @@
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        console.log('Renderer resized');
       });
     }
 

@@ -196,9 +196,19 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
   <script>
     console.log('BlockWorld script loaded, showing main menu');
-
+    //ランダム
+function generateNumber() {
+            // 1から9999までのランダムな数を生成
+            let num = Math.floor(Math.random() * 9999) + 1;
+            // 4桁のゼロ埋め形式に変換（例: 1 -> 0001）
+            let formattedNum = num.toString().padStart(4, '0');}
+  
+  
+  window.onload = generateNumber;
+  
     // グローバル変数
     let renderer, scene, camera, raycaster, player, sun, gameTime = 0;
+    let randomNumber;
 
     // ゲーム初期化
     function initGame() {
@@ -222,6 +232,8 @@
         throw e;
       }
 
+      
+      
       // シーンのセットアップ
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -282,9 +294,10 @@
       scene.add(sunLight);
       console.log('Sun light initialized');
 
+      
       // 簡易Perlinノイズ
       function noise(x, z) {
-        const seed = 12345;
+        const seed = 1234;
         const value = Math.sin(x * 0.05 + seed) * Math.cos(z * 0.05 + seed);
         return (value + 1) / 2;
       }
@@ -296,6 +309,7 @@
       const blocks = [];
       const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
 
+      
       // ワールド保存とロード
       function saveWorld() {
         try {
@@ -938,7 +952,7 @@
         player.velocity.z = move.dot(forward) * player.speed;
 
         // 重力
-        player.velocity.y -= 0.07;
+        player.velocity.y -= 0.05;
         let nextPos = player.position.clone().add(player.velocity);
 
         // エッジ検出
